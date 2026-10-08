@@ -1,0 +1,5 @@
+{"device_id":"D001","event_time":"2026-10-04T10:01:00","temperature":25.5}
+{"device_id":"D001","event_time":"2026-10-04T10:03:00","temperature":26.1}
+{"device_id":"D002","event_time":"2026-10-04T10:04:00","temperature":30.2}
+{"device_id":"D001","event_time":"2026-10-04T10:07:00","temperature":25.8}
+{"device_id":"D002","event_time":"2026-10-04T10:09:00","temperature":30.5}

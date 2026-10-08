@@ -1,0 +1,941 @@
+# Amazon Redshift — EXPLAIN Command
+
+## 1. What is EXPLAIN?
+
+`EXPLAIN` shows how Redshift's query optimizer plans to execute a SQL query **without actually executing the query**.
+
+```sql
+EXPLAIN
+SELECT *
+FROM sales
+WHERE customer_id = 101;
+```
+
+### Purpose
+
+Use `EXPLAIN` to investigate:
+
+* Query execution plan
+* Join strategy
+* Data redistribution between nodes
+* Table scans
+* Filters
+* Aggregations
+* Sort operations
+* Estimated rows
+* Estimated cost
+* Potential performance problems
+
+---
+
+# 2. Basic EXPLAIN Output
+
+Example:
+
+```text
+QUERY PLAN
+---------------------------------------------------------------------------
+XN HashAggregate  (cost=1500.00..1600.00 rows=500 width=50)
+  -> XN Hash Join DS_DIST_NONE
+       (cost=1000.00..1400.00 rows=50000 width=50)
+       Hash Cond: ("outer".customer_id = "inner".customer_id)
+
+       -> XN Seq Scan on sales s
+            (cost=0.00..800.00 rows=500000 width=24)
+            Filter: (sale_date >= '2026-01-01')
+
+       -> XN Hash
+            (cost=100.00..100.00 rows=10000 width=30)
+            -> XN Seq Scan on customers c
+                 (cost=0.00..100.00 rows=10000 width=30)
+```
+
+---
+
+# 3. How to Read EXPLAIN
+
+Think of the EXPLAIN output as a tree:
+
+```text
+                 HashAggregate
+                       |
+                   Hash Join
+                       |
+             +---------+---------+
+             |                   |
+         Seq Scan             Hash
+         sales                   |
+             |              Seq Scan
+          Filter             customers
+```
+
+Read the plan from the lower-level operations upward.
+
+Conceptually:
+
+```text
+Scan
+  ↓
+Filter
+  ↓
+Join
+  ↓
+Aggregate
+  ↓
+Final Result
+```
+
+---
+
+# 4. XN
+
+Example:
+
+```text
+XN Seq Scan
+XN Hash Join
+XN HashAggregate
+```
+
+`XN` indicates execution on the compute nodes in the traditional Redshift EXPLAIN terminology.
+
+---
+
+# 5. Seq Scan
+
+Example:
+
+```text
+XN Seq Scan on sales
+```
+
+Means Redshift scans the table.
+
+Example:
+
+```text
+-> XN Seq Scan on sales s
+     (cost=0.00..800.00 rows=500000 width=24)
+```
+
+Important:
+
+A sequential scan isn't automatically bad.
+
+For a query that needs a large percentage of a table, scanning many blocks can be expected.
+
+---
+
+# 6. Filter
+
+Example:
+
+```text
+Filter: (sale_date >= '2026-01-01')
+```
+
+This corresponds to:
+
+```sql
+WHERE sale_date >= '2026-01-01'
+```
+
+The optimizer plans to apply the predicate during the scan.
+
+---
+
+# 7. Cost
+
+Example:
+
+```text
+cost=0.00..800.00
+```
+
+There are two cost values:
+
+```text
+cost = startup cost .. total cost
+```
+
+The values are **relative optimizer costs**.
+
+They are NOT execution time.
+
+Do NOT say:
+
+```text
+cost=800 → 800 seconds
+```
+
+Instead:
+
+> EXPLAIN cost is a relative estimate used by the optimizer to compare execution strategies.
+
+---
+
+# 8. rows
+
+Example:
+
+```text
+rows=500000
+```
+
+This is Redshift's **estimated number of rows** produced by that operation.
+
+It is an estimate, not necessarily the actual number.
+
+Statistics influence these estimates.
+
+---
+
+# 9. width
+
+Example:
+
+```text
+width=24
+```
+
+Represents the estimated average output row width in bytes.
+
+Example:
+
+```text
+rows=500000 width=24
+```
+
+means Redshift estimates approximately:
+
+```text
+500,000 rows
+24 bytes per row
+```
+
+for that operation.
+
+---
+
+# 10. Hash
+
+Example:
+
+```text
+XN Hash
+```
+
+Redshift creates a hash structure used by a hash-based join.
+
+Conceptually:
+
+```text
+customers
+    |
+    ↓
+  HASH
+    |
+    ↓
+Hash table
+```
+
+Then the other side of the join can use the hash structure to find matching rows.
+
+---
+
+# 11. Hash Join
+
+Example:
+
+```text
+XN Hash Join
+```
+
+A hash join is being used to join two datasets.
+
+For:
+
+```sql
+SELECT *
+FROM sales s
+JOIN customers c
+    ON s.customer_id = c.customer_id;
+```
+
+The plan may contain:
+
+```text
+Hash Join
+Hash Cond: ("outer".customer_id = "inner".customer_id)
+```
+
+The hash condition corresponds to:
+
+```sql
+s.customer_id = c.customer_id
+```
+
+---
+
+# 12. HashAggregate
+
+Example:
+
+```text
+XN HashAggregate
+```
+
+Used when Redshift needs to perform aggregation.
+
+For:
+
+```sql
+SELECT
+    customer_id,
+    SUM(amount)
+FROM sales
+GROUP BY customer_id;
+```
+
+The plan may contain:
+
+```text
+HashAggregate
+```
+
+Conceptually:
+
+```text
+Rows
+ ↓
+GROUP BY
+ ↓
+SUM / COUNT / AVG / etc.
+```
+
+---
+
+# 13. Redshift Distribution Indicators
+
+These are extremely important for Redshift interviews.
+
+Look for:
+
+```text
+DS_DIST_NONE
+DS_BCAST_INNER
+DS_DIST_INNER
+DS_DIST_OUTER
+DS_DIST_BOTH
+DS_DIST_ALL_NONE
+```
+
+They tell you how data is distributed or redistributed between compute nodes during operations such as joins.
+
+---
+
+# 14. DS_DIST_NONE
+
+Example:
+
+```text
+XN Hash Join DS_DIST_NONE
+```
+
+Meaning:
+
+> No redistribution is required for the join.
+
+Conceptually:
+
+```text
+Table A
+   |
+   | already appropriately distributed
+   |
+Table B
+   ↓
+Join
+```
+
+Example:
+
+```text
+sales
+DISTKEY(customer_id)
+
+customers
+DISTKEY(customer_id)
+```
+
+If they are appropriately colocated on the join key:
+
+```sql
+ON sales.customer_id = customers.customer_id
+```
+
+Redshift may be able to perform the join without redistributing the rows.
+
+### Interview point
+
+`DS_DIST_NONE` is generally desirable for a large-table join because it avoids a redistribution step.
+
+---
+
+# 15. DS_BCAST_INNER
+
+Example:
+
+```text
+XN Hash Join DS_BCAST_INNER
+```
+
+Means the inner table is broadcast to the compute nodes.
+
+Conceptually:
+
+```text
+             Small table
+                  |
+        +---------+---------+
+        ↓         ↓         ↓
+      Node 1    Node 2    Node 3
+```
+
+Example:
+
+```text
+sales       = 500 million rows
+customers   = 10,000 rows
+```
+
+Redshift may broadcast the relatively small `customers` table.
+
+### Interview answer
+
+> `DS_BCAST_INNER` means Redshift broadcasts the inner side of the join to the compute nodes.
+
+---
+
+# 16. DS_DIST_INNER
+
+Example:
+
+```text
+XN Hash Join DS_DIST_INNER
+```
+
+Means the inner table is redistributed between compute nodes.
+
+Conceptually:
+
+```text
+Inner table
+     ↓
+Redistribution
+     ↓
+Compute nodes
+     ↓
+Join
+```
+
+This can involve network data movement.
+
+---
+
+# 17. DS_DIST_OUTER
+
+Example:
+
+```text
+XN Hash Join DS_DIST_OUTER
+```
+
+Means the outer table is redistributed between compute nodes.
+
+Conceptually:
+
+```text
+Outer table
+     ↓
+Redistribution
+     ↓
+Compute nodes
+     ↓
+Join
+```
+
+---
+
+# 18. DS_DIST_BOTH
+
+Example:
+
+```text
+XN Hash Join DS_DIST_BOTH
+```
+
+Means both sides of the join require redistribution.
+
+Conceptually:
+
+```text
+Table A ──────┐
+              ├── Redistribution
+Table B ──────┘
+                    ↓
+                   Join
+```
+
+For large tables, this can cause significant network data movement.
+
+### Interview point
+
+If you see:
+
+```text
+DS_DIST_BOTH
+```
+
+investigate the distribution strategy, especially:
+
+```text
+DISTKEY
+DISTSTYLE
+JOIN KEY
+table sizes
+data skew
+```
+
+---
+
+# 19. DS_DIST_ALL_NONE
+
+Example:
+
+```text
+XN Hash Join DS_DIST_ALL_NONE
+```
+
+This can occur when a table uses:
+
+```sql
+DISTSTYLE ALL
+```
+
+Because copies of the table exist on all compute nodes, Redshift can avoid redistribution for that table.
+
+Conceptually:
+
+```text
+Small Dimension
+      |
++-----+-----+-----+
+↓           ↓     ↓
+Node 1     Node 2 Node 3
+```
+
+Useful for relatively small dimension tables.
+
+---
+
+# 20. Distribution Summary
+
+| EXPLAIN indicator  | Meaning                               |
+| ------------------ | ------------------------------------- |
+| `DS_DIST_NONE`     | No redistribution                     |
+| `DS_BCAST_INNER`   | Broadcast inner table                 |
+| `DS_DIST_INNER`    | Redistribute inner table              |
+| `DS_DIST_OUTER`    | Redistribute outer table              |
+| `DS_DIST_BOTH`     | Redistribute both tables              |
+| `DS_DIST_ALL_NONE` | `DISTSTYLE ALL` avoids redistribution |
+
+---
+
+# 21. Complete Example
+
+Query:
+
+```sql
+EXPLAIN
+SELECT
+    c.customer_name,
+    SUM(s.amount) AS total_amount
+FROM sales s
+JOIN customers c
+    ON s.customer_id = c.customer_id
+WHERE s.sale_date >= '2026-01-01'
+GROUP BY c.customer_name;
+```
+
+Possible plan:
+
+```text
+XN HashAggregate
+  -> XN Hash Join DS_DIST_NONE
+       Hash Cond:
+       ("outer".customer_id = "inner".customer_id)
+
+       -> XN Seq Scan on sales s
+            Filter:
+            (sale_date >= '2026-01-01')
+
+       -> XN Hash
+            -> XN Seq Scan on customers c
+```
+
+Interpretation:
+
+```text
+sales
+  |
+  ↓
+Seq Scan
+  |
+  ↓
+Filter sale_date
+  |
+  +----------------+
+                   |
+customers          |
+  |                |
+  ↓                |
+Seq Scan           |
+  |                |
+  ↓                |
+Hash --------------+
+       ↓
+   Hash Join
+       |
+       | DS_DIST_NONE
+       ↓
+ HashAggregate
+       |
+       ↓
+ Final Result
+```
+
+---
+
+# 22. What to Look for in EXPLAIN
+
+When analyzing a Redshift query, check these in order:
+
+### 1. Table scans
+
+```text
+Seq Scan
+```
+
+Ask:
+
+* How much data is being scanned?
+* Is there a selective filter?
+* Is the query reading a huge table unnecessarily?
+
+---
+
+### 2. Filters
+
+Look for:
+
+```text
+Filter:
+```
+
+Check whether predicates are reducing the amount of data processed.
+
+---
+
+### 3. Join strategy
+
+Look for:
+
+```text
+Hash Join
+Merge Join
+Nested Loop
+```
+
+Understand why the optimizer selected that strategy.
+
+---
+
+### 4. Data redistribution
+
+Look for:
+
+```text
+DS_DIST_NONE
+DS_BCAST_INNER
+DS_DIST_INNER
+DS_DIST_OUTER
+DS_DIST_BOTH
+```
+
+Especially investigate large-table redistribution.
+
+---
+
+### 5. Estimated rows
+
+Look for:
+
+```text
+rows=...
+```
+
+Compare the estimates with what you know about the data.
+
+Bad estimates can indicate stale/inaccurate statistics.
+
+---
+
+### 6. Cost
+
+Look for:
+
+```text
+cost=...
+```
+
+Use it to compare operations/plans.
+
+Do not interpret it as seconds.
+
+---
+
+### 7. Aggregation
+
+Look for:
+
+```text
+HashAggregate
+GroupAggregate
+```
+
+Large aggregations may require substantial processing.
+
+---
+
+### 8. Sort operations
+
+Look for:
+
+```text
+Sort
+```
+
+Sorting large datasets can be expensive.
+
+---
+
+# 23. EXPLAIN + ANALYZE Relationship
+
+These three commands have different purposes:
+
+```text
+             EXPLAIN
+                ↓
+       Execution Plan
+                ↓
+             ANALYZE
+                ↓
+        Table Statistics
+                ↓
+       Better Estimates
+```
+
+### EXPLAIN
+
+```sql
+EXPLAIN
+SELECT ...;
+```
+
+Answers:
+
+> How does Redshift plan to execute this query?
+
+### ANALYZE
+
+```sql
+ANALYZE sales;
+```
+
+Answers:
+
+> Does the optimizer have current table statistics?
+
+### VACUUM
+
+```sql
+VACUUM sales;
+```
+
+Addresses physical table organization such as sorting and deleted-row cleanup as applicable.
+
+---
+
+# 24. Important Interview Question
+
+### Q: What do you look for when analyzing an EXPLAIN plan?
+
+### Answer
+
+> First, I look at the execution tree and identify the major operations such as scans, joins, aggregations and sorts. Then I focus on the distribution indicators, especially whether large tables are being redistributed. I check whether filters are reducing the data being processed, whether estimated row counts look reasonable, and whether there are expensive joins or aggregations. If the estimates appear inaccurate, I check the table statistics and consider running ANALYZE where appropriate.
+
+---
+
+# 25. Important Redshift EXPLAIN Cheat Sheet
+
+```text
+EXPLAIN
+   ↓
+Execution plan
+```
+
+```text
+Seq Scan
+   ↓
+Scan table
+```
+
+```text
+Filter
+   ↓
+Apply predicate
+```
+
+```text
+Hash
+   ↓
+Build hash structure
+```
+
+```text
+Hash Join
+   ↓
+Join using hash
+```
+
+```text
+HashAggregate
+   ↓
+GROUP BY / aggregation
+```
+
+```text
+cost
+   ↓
+Relative optimizer cost
+```
+
+```text
+rows
+   ↓
+Estimated output rows
+```
+
+```text
+width
+   ↓
+Estimated average row size
+```
+
+```text
+DS_DIST_NONE
+   ↓
+No redistribution
+```
+
+```text
+DS_BCAST_INNER
+   ↓
+Broadcast inner table
+```
+
+```text
+DS_DIST_INNER
+   ↓
+Redistribute inner table
+```
+
+```text
+DS_DIST_OUTER
+   ↓
+Redistribute outer table
+```
+
+```text
+DS_DIST_BOTH
+   ↓
+Redistribute both tables
+```
+
+```text
+DS_DIST_ALL_NONE
+   ↓
+DISTSTYLE ALL avoids redistribution
+```
+
+# 26. Most Important Memory Trick
+
+For Redshift interviews, remember:
+
+```text
+EXPLAIN
+│
+├── SCAN
+│     └── What tables are being read?
+│
+├── FILTER
+│     └── How much data is filtered?
+│
+├── JOIN
+│     └── How are tables joined?
+│
+├── DS_*
+│     └── Is data moving between nodes?
+│
+├── AGGREGATE
+│     └── GROUP BY / SUM / COUNT?
+│
+├── SORT
+│     └── Is large data being sorted?
+│
+├── rows
+│     └── How many rows are estimated?
+│
+├── width
+│     └── How large is each row?
+│
+└── cost
+      └── Relative execution cost
+```
+
+### Golden interview rule
+
+```text
+DS_DIST_NONE
+       ↓
+No redistribution
+
+DS_BCAST_INNER
+       ↓
+Broadcast inner table
+
+DS_DIST_INNER
+       ↓
+Redistribute inner table
+
+DS_DIST_OUTER
+       ↓
+Redistribute outer table
+
+DS_DIST_BOTH
+       ↓
+Redistribute both
+```
+
+**The biggest Redshift-specific thing to watch in an EXPLAIN plan is data movement between compute nodes.**

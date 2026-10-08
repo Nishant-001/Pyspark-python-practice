@@ -1,0 +1,10 @@
+{"device_id":"D001","event_time":"2026-01-01T10:00:00","temperature":25.5}
+{"device_id":"D001","event_time":"2026-01-01T10:03:00","temperature":25.8}
+{"device_id":"D002","event_time":"2026-01-01T10:04:00","temperature":30.2}
+{"device_id":"D001","event_time":"2026-01-01T10:07:00","temperature":26.1}
+{"device_id":"D002","event_time":"2026-01-01T10:09:00","temperature":30.5}
+{"device_id":"D001","event_time":"2026-01-01T10:12:00","temperature":26.4}
+{"device_id":"D002","event_time":"2026-01-01T10:14:00","temperature":30.8}
+{"device_id":"D001","event_time":"2026-01-01T10:18:00","temperature":26.0}
+{"device_id":"D002","event_time":"2026-01-01T10:21:00","temperature":31.0}
+{"device_id":"D001","event_time":"2026-01-01T10:25:00","temperature":26.7}
