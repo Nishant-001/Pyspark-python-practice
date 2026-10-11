@@ -14,7 +14,7 @@
 # Expected structure:
 
 # {
-#     "IT": [...],
+#     "IT": [{"name": "A", "dept": "IT", "salary": 50000},{"name": "C", "dept": "IT", "salary": 70000}],
 #     "HR": [...]
 # }
 

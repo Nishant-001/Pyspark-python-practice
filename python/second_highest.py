@@ -27,3 +27,6 @@ b[0].append(99)
 
 print(a)
 print(b)
+
+first=float("-inf")
+second=float("-inf")
